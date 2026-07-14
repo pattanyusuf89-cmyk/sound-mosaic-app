@@ -129,5 +129,4 @@
 }
 @utility animate-fade-up {
   animation: fadeUp 300ms ease-out;
-  }
 }
