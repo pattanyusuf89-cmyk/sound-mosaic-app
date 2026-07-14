@@ -57,6 +57,19 @@ export async function searchTracks(query: string): Promise<Track[]> {
   return items.map(mapItem).filter((t): t is Track => !!t).slice(0, 30);
 }
 
+// Search for videos generally (used for audiobooks / long-form content).
+export async function searchVideos(query: string): Promise<Track[]> {
+  if (!query.trim()) return [];
+  const data = await pipedFetch(
+    `/search?q=${encodeURIComponent(query)}&filter=videos`,
+  );
+  const items: any[] = Array.isArray(data?.items) ? data.items : [];
+  return items
+    .map(mapItem)
+    .filter((t): t is Track => !!t)
+    .slice(0, 30);
+}
+
 export async function trending(region = "US"): Promise<Track[]> {
   try {
     const data = await pipedFetch(`/trending?region=${region}`);
