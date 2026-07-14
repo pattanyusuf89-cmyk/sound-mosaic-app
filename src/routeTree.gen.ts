@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as LibraryRouteImport } from './routes/library'
+import { Route as AudiobooksRouteImport } from './routes/audiobooks'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PlaylistIdRouteImport } from './routes/playlist.$id'
 
@@ -30,6 +31,11 @@ const LibraryRoute = LibraryRouteImport.update({
   path: '/library',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AudiobooksRoute = AudiobooksRouteImport.update({
+  id: '/audiobooks',
+  path: '/audiobooks',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -43,6 +49,7 @@ const PlaylistIdRoute = PlaylistIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/audiobooks': typeof AudiobooksRoute
   '/library': typeof LibraryRoute
   '/search': typeof SearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/audiobooks': typeof AudiobooksRoute
   '/library': typeof LibraryRoute
   '/search': typeof SearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/audiobooks': typeof AudiobooksRoute
   '/library': typeof LibraryRoute
   '/search': typeof SearchRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -65,12 +74,25 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/library' | '/search' | '/sitemap.xml' | '/playlist/$id'
+  fullPaths:
+    | '/'
+    | '/audiobooks'
+    | '/library'
+    | '/search'
+    | '/sitemap.xml'
+    | '/playlist/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/library' | '/search' | '/sitemap.xml' | '/playlist/$id'
+  to:
+    | '/'
+    | '/audiobooks'
+    | '/library'
+    | '/search'
+    | '/sitemap.xml'
+    | '/playlist/$id'
   id:
     | '__root__'
     | '/'
+    | '/audiobooks'
     | '/library'
     | '/search'
     | '/sitemap.xml'
@@ -79,6 +101,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AudiobooksRoute: typeof AudiobooksRoute
   LibraryRoute: typeof LibraryRoute
   SearchRoute: typeof SearchRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
@@ -108,6 +131,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LibraryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/audiobooks': {
+      id: '/audiobooks'
+      path: '/audiobooks'
+      fullPath: '/audiobooks'
+      preLoaderRoute: typeof AudiobooksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -127,6 +157,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AudiobooksRoute: AudiobooksRoute,
   LibraryRoute: LibraryRoute,
   SearchRoute: SearchRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,

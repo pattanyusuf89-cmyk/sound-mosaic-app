@@ -10,7 +10,12 @@ import {
 } from "react";
 import type { Track, LyricLine, RepeatMode } from "@/lib/types";
 import { fetchLyrics } from "@/lib/lyrics";
-import { pushHistory } from "@/lib/storage";
+import {
+  pushHistory,
+  isAudiobook,
+  getAudiobookProgress,
+  setAudiobookProgress,
+} from "@/lib/storage";
 import { getRelated } from "@/lib/youtube";
 
 // ---- YouTube IFrame API loader ----
@@ -86,6 +91,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [fullLyricsOpen, setFullLyricsOpen] = useState(false);
   const readyRef = useRef(false);
   const onEndedRef = useRef<() => void>(() => {});
+  const resumedRef = useRef<Set<string>>(new Set());
 
   // Mount hidden YT player once
   useEffect(() => {
@@ -130,10 +136,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         const dur = p.getDuration() ?? 0;
         setPosition(pos);
         if (dur) setDuration(dur);
+        // Save audiobook progress every ~5s.
+        if (current && isAudiobook(current.id) && pos > 0) {
+          setAudiobookProgress(current.id, pos);
+        }
       } catch { /* ignore */ }
     }, 250);
     return () => clearInterval(t);
-  }, []);
+  }, [current]);
+
+  // Auto-resume audiobooks from last saved position.
+  useEffect(() => {
+    if (!current || !playing) return;
+    if (!isAudiobook(current.id)) return;
+    if (resumedRef.current.has(current.id)) return;
+    const saved = getAudiobookProgress(current.id);
+    if (saved > 5) {
+      try { playerRef.current?.seekTo(saved, true); } catch { /* ignore */ }
+    }
+    resumedRef.current.add(current.id);
+  }, [current, playing]);
 
   // MediaSession
   useEffect(() => {
