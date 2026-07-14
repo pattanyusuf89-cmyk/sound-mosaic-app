@@ -1,0 +1,287 @@
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+  type ReactNode,
+} from "react";
+import type { Track, LyricLine, RepeatMode } from "@/lib/types";
+import { fetchLyrics } from "@/lib/lyrics";
+import { pushHistory } from "@/lib/storage";
+import { getRelated } from "@/lib/youtube";
+
+// ---- YouTube IFrame API loader ----
+let ytReadyPromise: Promise<typeof window.YT> | null = null;
+function loadYT(): Promise<typeof window.YT> {
+  if (typeof window === "undefined") return Promise.reject(new Error("no window"));
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (ytReadyPromise) return ytReadyPromise;
+  ytReadyPromise = new Promise((resolve) => {
+    const prev = (window as any).onYouTubeIframeAPIReady;
+    (window as any).onYouTubeIframeAPIReady = () => {
+      prev?.();
+      resolve(window.YT);
+    };
+    const s = document.createElement("script");
+    s.src = "https://www.youtube.com/iframe_api";
+    s.async = true;
+    document.head.appendChild(s);
+  });
+  return ytReadyPromise;
+}
+
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+type Ctx = {
+  current: Track | null;
+  queue: Track[];
+  index: number;
+  playing: boolean;
+  position: number;
+  duration: number;
+  shuffle: boolean;
+  repeat: RepeatMode;
+  lyrics: LyricLine[];
+  lyricsPlain: string | null;
+  lyricsLoaded: boolean;
+  fullPlayerOpen: boolean;
+  fullLyricsOpen: boolean;
+  play: (t: Track, queue?: Track[]) => void;
+  toggle: () => void;
+  next: () => void;
+  prev: () => void;
+  seek: (t: number) => void;
+  toggleShuffle: () => void;
+  cycleRepeat: () => void;
+  setFullPlayer: (v: boolean) => void;
+  setFullLyrics: (v: boolean) => void;
+  addToQueue: (t: Track) => void;
+};
+
+const PlayerCtx = createContext<Ctx | null>(null);
+
+export function PlayerProvider({ children }: { children: ReactNode }) {
+  const playerRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [current, setCurrent] = useState<Track | null>(null);
+  const [queue, setQueue] = useState<Track[]>([]);
+  const [index, setIndex] = useState<number>(-1);
+  const [playing, setPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [shuffle, setShuffle] = useState(false);
+  const [repeat, setRepeat] = useState<RepeatMode>("off");
+  const [lyrics, setLyrics] = useState<LyricLine[]>([]);
+  const [lyricsPlain, setLyricsPlain] = useState<string | null>(null);
+  const [lyricsLoaded, setLyricsLoaded] = useState(false);
+  const [fullPlayerOpen, setFullPlayerOpen] = useState(false);
+  const [fullLyricsOpen, setFullLyricsOpen] = useState(false);
+  const readyRef = useRef(false);
+  const onEndedRef = useRef<() => void>(() => {});
+
+  // Mount hidden YT player once
+  useEffect(() => {
+    let cancelled = false;
+    const div = document.createElement("div");
+    div.id = "yt-player-mount";
+    div.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;pointer-events:none;opacity:0;";
+    document.body.appendChild(div);
+    containerRef.current = div;
+    const inner = document.createElement("div");
+    inner.id = "yt-player";
+    div.appendChild(inner);
+
+    loadYT().then((YT) => {
+      if (cancelled) return;
+      playerRef.current = new YT.Player("yt-player", {
+        height: "1",
+        width: "1",
+        playerVars: { autoplay: 0, controls: 0, playsinline: 1, rel: 0, modestbranding: 1 },
+        events: {
+          onReady: () => { readyRef.current = true; },
+          onStateChange: (e: any) => {
+            const S = window.YT.PlayerState;
+            if (e.data === S.PLAYING) setPlaying(true);
+            else if (e.data === S.PAUSED) setPlaying(false);
+            else if (e.data === S.ENDED) onEndedRef.current();
+          },
+        },
+      });
+    });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // position ticker
+  useEffect(() => {
+    const t = setInterval(() => {
+      const p = playerRef.current;
+      if (!p?.getCurrentTime) return;
+      try {
+        const pos = p.getCurrentTime() ?? 0;
+        const dur = p.getDuration() ?? 0;
+        setPosition(pos);
+        if (dur) setDuration(dur);
+      } catch { /* ignore */ }
+    }, 250);
+    return () => clearInterval(t);
+  }, []);
+
+  // MediaSession
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !current) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: current.title,
+      artist: current.artist,
+      artwork: [
+        { src: current.thumbnail, sizes: "512x512", type: "image/jpeg" },
+      ],
+    });
+    navigator.mediaSession.setActionHandler("play", () => playerRef.current?.playVideo());
+    navigator.mediaSession.setActionHandler("pause", () => playerRef.current?.pauseVideo());
+    navigator.mediaSession.setActionHandler("nexttrack", () => next());
+    navigator.mediaSession.setActionHandler("previoustrack", () => prev());
+    try {
+      navigator.mediaSession.setActionHandler("seekto", (d: any) => {
+        if (typeof d.seekTime === "number") playerRef.current?.seekTo(d.seekTime, true);
+      });
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
+
+  // Playback state -> MediaSession
+  useEffect(() => {
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+    }
+  }, [playing]);
+
+  // Fetch lyrics on track change
+  useEffect(() => {
+    if (!current) { setLyrics([]); setLyricsPlain(null); setLyricsLoaded(false); return; }
+    let cancelled = false;
+    setLyrics([]); setLyricsPlain(null); setLyricsLoaded(false);
+    const cleanTitle = current.title.replace(/\(.*?\)|\[.*?\]|official.*|lyrics?|hd|4k|mv|music video/gi, "").trim();
+    const cleanArtist = current.artist.replace(/\s*-\s*topic$/i, "").trim();
+    fetchLyrics(cleanTitle, cleanArtist).then((r) => {
+      if (cancelled) return;
+      if (r) { setLyrics(r.synced); setLyricsPlain(r.plain); }
+      setLyricsLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [current]);
+
+  const play = useCallback((t: Track, q?: Track[]) => {
+    const newQueue = q && q.length ? q : [t];
+    const idx = Math.max(0, newQueue.findIndex((x) => x.id === t.id));
+    setQueue(newQueue);
+    setIndex(idx);
+    setCurrent(t);
+    pushHistory(t);
+    const doPlay = () => {
+      try {
+        playerRef.current.loadVideoById({ videoId: t.id });
+        playerRef.current.playVideo();
+      } catch { /* ignore */ }
+    };
+    if (readyRef.current && playerRef.current?.loadVideoById) doPlay();
+    else loadYT().then(() => {
+      const iv = setInterval(() => {
+        if (readyRef.current && playerRef.current?.loadVideoById) { clearInterval(iv); doPlay(); }
+      }, 100);
+      setTimeout(() => clearInterval(iv), 5000);
+    });
+  }, []);
+
+  const toggle = useCallback(() => {
+    const p = playerRef.current; if (!p) return;
+    if (playing) p.pauseVideo(); else p.playVideo();
+  }, [playing]);
+
+  const seek = useCallback((t: number) => {
+    playerRef.current?.seekTo(t, true);
+    setPosition(t);
+  }, []);
+
+  const playAt = useCallback((i: number) => {
+    if (i < 0 || i >= queue.length) return;
+    const t = queue[i];
+    setIndex(i);
+    setCurrent(t);
+    pushHistory(t);
+    try {
+      playerRef.current?.loadVideoById({ videoId: t.id });
+      playerRef.current?.playVideo();
+    } catch { /* ignore */ }
+  }, [queue]);
+
+  const next = useCallback(async () => {
+    if (repeat === "one") { seek(0); playerRef.current?.playVideo(); return; }
+    if (shuffle && queue.length > 1) {
+      let n = index;
+      while (n === index) n = Math.floor(Math.random() * queue.length);
+      playAt(n); return;
+    }
+    if (index + 1 < queue.length) { playAt(index + 1); return; }
+    if (repeat === "all" && queue.length) { playAt(0); return; }
+    // auto-generate: fetch related to current
+    if (current) {
+      const rel = await getRelated(current.id);
+      if (rel.length) {
+        const filtered = rel.filter((r) => r.id !== current.id);
+        const merged = [...queue, ...filtered];
+        setQueue(merged);
+        const nextIdx = queue.length; // first newly appended
+        setIndex(nextIdx);
+        const t = merged[nextIdx];
+        setCurrent(t);
+        pushHistory(t);
+        try {
+          playerRef.current?.loadVideoById({ videoId: t.id });
+          playerRef.current?.playVideo();
+        } catch { /* ignore */ }
+      }
+    }
+  }, [repeat, shuffle, queue, index, current, playAt, seek]);
+
+  const prev = useCallback(() => {
+    if (position > 3) { seek(0); return; }
+    if (index > 0) playAt(index - 1);
+    else seek(0);
+  }, [position, index, playAt, seek]);
+
+  useEffect(() => { onEndedRef.current = () => { next(); }; }, [next]);
+
+  const toggleShuffle = useCallback(() => setShuffle((s) => !s), []);
+  const cycleRepeat = useCallback(() =>
+    setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off")), []);
+  const addToQueue = useCallback((t: Track) => {
+    setQueue((q) => (q.some((x) => x.id === t.id) ? q : [...q, t]));
+  }, []);
+
+  const value: Ctx = useMemo(() => ({
+    current, queue, index, playing, position, duration,
+    shuffle, repeat, lyrics, lyricsPlain, lyricsLoaded,
+    fullPlayerOpen, fullLyricsOpen,
+    play, toggle, next, prev, seek, toggleShuffle, cycleRepeat,
+    setFullPlayer: setFullPlayerOpen, setFullLyrics: setFullLyricsOpen, addToQueue,
+  }), [current, queue, index, playing, position, duration, shuffle, repeat,
+       lyrics, lyricsPlain, lyricsLoaded, fullPlayerOpen, fullLyricsOpen,
+       play, toggle, next, prev, seek, toggleShuffle, cycleRepeat, addToQueue]);
+
+  return <PlayerCtx.Provider value={value}>{children}</PlayerCtx.Provider>;
+}
+
+export function usePlayer(): Ctx {
+  const c = useContext(PlayerCtx);
+  if (!c) throw new Error("usePlayer outside PlayerProvider");
+  return c;
+}
