@@ -6,6 +6,8 @@ const KEYS = {
   playlists: "sn.playlists",
   recentSearches: "sn.recentSearches",
   artistCounts: "sn.artistCounts",
+  audiobooks: "sn.audiobooks",
+  audiobookProgress: "sn.audiobookProgress",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -96,4 +98,30 @@ export function topArtists(limit = 10): Artist[] {
 export function useStorageVersion(): number {
   // used via subscribe; simple counter via listener in components
   return 0;
+}
+
+// ------- audiobooks -------
+export function getAudiobooks(): Track[] {
+  return read<Track[]>(KEYS.audiobooks, []);
+}
+export function saveAudiobook(t: Track) {
+  const cur = getAudiobooks().filter((x) => x.id !== t.id);
+  cur.unshift(t);
+  write(KEYS.audiobooks, cur.slice(0, 100));
+}
+export function removeAudiobook(id: string) {
+  write(KEYS.audiobooks, getAudiobooks().filter((x) => x.id !== id));
+}
+export function isAudiobook(id: string): boolean {
+  return getAudiobooks().some((x) => x.id === id);
+}
+export function getAudiobookProgress(id: string): number {
+  const rec = read<Record<string, number>>(KEYS.audiobookProgress, {});
+  return rec[id] ?? 0;
+}
+export function setAudiobookProgress(id: string, seconds: number) {
+  const rec = read<Record<string, number>>(KEYS.audiobookProgress, {});
+  if (seconds < 5) return;
+  rec[id] = Math.floor(seconds);
+  write(KEYS.audiobookProgress, rec);
 }
