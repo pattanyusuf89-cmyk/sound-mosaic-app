@@ -13,7 +13,7 @@ import {
   isAudiobook,
   getAudiobookProgress,
 } from "@/lib/storage";
-import { hasDownload, deleteDownload, listDownloads } from "@/lib/downloads";
+import { hasDownload, deleteDownload } from "@/lib/downloads";
 import { usePlayer } from "@/context/player";
 import { useStorageSubscription } from "@/hooks/use-storage";
 import { ChaptersSheet } from "@/components/chapters-sheet";
