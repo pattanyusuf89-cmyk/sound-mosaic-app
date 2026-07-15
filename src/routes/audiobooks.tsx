@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { BookHeadphones, BookmarkPlus, BookmarkCheck, Play, X } from "lucide-react";
+import {
+  BookHeadphones, BookmarkPlus, BookmarkCheck, Play, X,
+  Download, ListOrdered, CheckCircle2, Trash2,
+} from "lucide-react";
 import { searchVideos } from "@/lib/youtube";
 import {
   getAudiobooks,
@@ -10,8 +13,11 @@ import {
   isAudiobook,
   getAudiobookProgress,
 } from "@/lib/storage";
+import { hasDownload, deleteDownload, listDownloads } from "@/lib/downloads";
 import { usePlayer } from "@/context/player";
 import { useStorageSubscription } from "@/hooks/use-storage";
+import { ChaptersSheet } from "@/components/chapters-sheet";
+import { DownloadDialog } from "@/components/download-dialog";
 import type { Track } from "@/lib/types";
 
 export const Route = createFileRoute("/audiobooks")({
@@ -49,6 +55,8 @@ function Audiobooks() {
   useStorageSubscription();
   const [cat, setCat] = useState<string>("Fiction");
   const [q, setQ] = useState("");
+  const [chaptersFor, setChaptersFor] = useState<Track | null>(null);
+  const [downloadFor, setDownloadFor] = useState<Track | null>(null);
   const { play } = usePlayer();
   const saved = getAudiobooks();
 
@@ -123,17 +131,52 @@ function Audiobooks() {
         {results.error && <div className="text-sm text-destructive">Couldn't load audiobooks.</div>}
         <div className="space-y-1">
           {(results.data ?? []).map((t) => (
-            <BookRow key={t.id} track={t} queue={results.data ?? []} onPlay={play} />
+            <BookRow
+              key={t.id}
+              track={t}
+              queue={results.data ?? []}
+              onPlay={play}
+              onChapters={() => setChaptersFor(t)}
+              onDownload={() => setDownloadFor(t)}
+            />
           ))}
         </div>
       </section>
+
+      {chaptersFor && (
+        <ChaptersSheet
+          videoId={chaptersFor.id}
+          title={chaptersFor.title}
+          onClose={() => setChaptersFor(null)}
+        />
+      )}
+      {downloadFor && (
+        <DownloadDialog
+          videoId={downloadFor.id}
+          title={downloadFor.title}
+          onClose={() => setDownloadFor(null)}
+        />
+      )}
     </div>
   );
 }
 
-function BookRow({ track, queue, onPlay }: { track: Track; queue: Track[]; onPlay: (t: Track, q?: Track[]) => void }) {
+function BookRow({
+  track, queue, onPlay, onChapters, onDownload,
+}: {
+  track: Track;
+  queue: Track[];
+  onPlay: (t: Track, q?: Track[]) => void;
+  onChapters: () => void;
+  onDownload: () => void;
+}) {
   useStorageSubscription();
   const savedFlag = isAudiobook(track.id);
+  const dl = useQuery({
+    queryKey: ["dl", track.id],
+    queryFn: () => hasDownload(track.id),
+    staleTime: 5_000,
+  });
   return (
     <div className="group flex w-full items-center gap-3 rounded-md p-2 hover:bg-surface-elevated">
       <button
@@ -154,6 +197,22 @@ function BookRow({ track, queue, onPlay }: { track: Track; queue: Track[]; onPla
         </div>
       </button>
       <button
+        onClick={onChapters}
+        aria-label="Chapters"
+        className="shrink-0 rounded-full p-2 text-muted-foreground hover:text-foreground"
+      >
+        <ListOrdered className="h-5 w-5" />
+      </button>
+      <button
+        onClick={dl.data ? () => deleteDownload(track.id).then(() => dl.refetch()) : onDownload}
+        aria-label={dl.data ? "Remove download" : "Download"}
+        className="shrink-0 rounded-full p-2 text-muted-foreground hover:text-foreground"
+      >
+        {dl.data
+          ? <CheckCircle2 className="h-5 w-5 text-brand" />
+          : <Download className="h-5 w-5" />}
+      </button>
+      <button
         onClick={() => (savedFlag ? removeAudiobook(track.id) : saveAudiobook(track))}
         aria-label={savedFlag ? "Remove from library" : "Save to library"}
         className="shrink-0 rounded-full p-2 text-muted-foreground hover:text-foreground"
@@ -164,10 +223,23 @@ function BookRow({ track, queue, onPlay }: { track: Track; queue: Track[]; onPla
   );
 }
 
-function SavedRow({ track, queue, onPlay }: { track: Track; queue: Track[]; onPlay: (t: Track, q?: Track[]) => void }) {
+function SavedRow({
+  track, queue, onPlay, onChapters, onDownload,
+}: {
+  track: Track;
+  queue: Track[];
+  onPlay: (t: Track, q?: Track[]) => void;
+  onChapters: () => void;
+  onDownload: () => void;
+}) {
   useStorageSubscription();
   const progress = getAudiobookProgress(track.id);
   const pct = progress && track.duration ? Math.min(100, (progress / track.duration) * 100) : 0;
+  const dl = useQuery({
+    queryKey: ["dl", track.id],
+    queryFn: () => hasDownload(track.id),
+    staleTime: 5_000,
+  });
   return (
     <div className="group flex w-full items-center gap-3 rounded-md p-2 hover:bg-surface-elevated">
       <button
@@ -184,6 +256,7 @@ function SavedRow({ track, queue, onPlay }: { track: Track; queue: Track[]; onPl
           <div className="truncate text-sm font-medium">{track.title}</div>
           <div className="truncate text-xs text-muted-foreground">
             {progress > 0 ? `Resume from ${fmt(progress)}` : track.artist}
+            {dl.data ? " · Offline" : ""}
           </div>
           {pct > 0 && (
             <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-surface">
@@ -191,6 +264,22 @@ function SavedRow({ track, queue, onPlay }: { track: Track; queue: Track[]; onPl
             </div>
           )}
         </div>
+      </button>
+      <button
+        onClick={onChapters}
+        aria-label="Chapters"
+        className="shrink-0 rounded-full p-2 text-muted-foreground hover:text-foreground"
+      >
+        <ListOrdered className="h-5 w-5" />
+      </button>
+      <button
+        onClick={dl.data ? () => deleteDownload(track.id).then(() => dl.refetch()) : onDownload}
+        aria-label={dl.data ? "Remove download" : "Download"}
+        className="shrink-0 rounded-full p-2 text-muted-foreground hover:text-foreground"
+      >
+        {dl.data
+          ? <Trash2 className="h-5 w-5 text-brand" />
+          : <Download className="h-5 w-5" />}
       </button>
       <button
         onClick={() => removeAudiobook(track.id)}
