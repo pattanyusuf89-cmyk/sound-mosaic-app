@@ -72,6 +72,9 @@ export async function searchVideos(query: string): Promise<Track[]> {
 
 export async function trending(region = "US"): Promise<Track[]> {
   try {
+    // Prefer music-song results so trending isn't dominated by news / general clips.
+    const songs = await searchTracks("top hits this week");
+    if (songs.length) return songs;
     const data = await pipedFetch(`/trending?region=${region}`);
     const items: any[] = Array.isArray(data) ? data : [];
     return items.map(mapItem).filter((t): t is Track => !!t).slice(0, 20);
@@ -88,6 +91,43 @@ export async function getRelated(videoId: string): Promise<Track[]> {
   } catch {
     return [];
   }
+}
+
+// ---- Streams (audio URLs + chapters) ----
+export type AudioStream = {
+  url: string;
+  quality: string;        // e.g. "128 kbps"
+  bitrate: number;        // bits per second
+  mimeType: string;       // e.g. "audio/mp4"
+  codec?: string;
+};
+export type Chapter = { title: string; start: number; image?: string };
+export type StreamInfo = {
+  audioStreams: AudioStream[];
+  chapters: Chapter[];
+  duration: number;
+};
+
+export async function getStreamInfo(videoId: string): Promise<StreamInfo> {
+  const data = await pipedFetch(`/streams/${videoId}`);
+  const audio: AudioStream[] = (Array.isArray(data?.audioStreams) ? data.audioStreams : [])
+    .map((s: any) => ({
+      url: String(s.url ?? ""),
+      quality: String(s.quality ?? `${Math.round((s.bitrate ?? 0) / 1000)} kbps`),
+      bitrate: Number(s.bitrate ?? 0),
+      mimeType: String(s.mimeType ?? "audio/mp4"),
+      codec: s.codec,
+    }))
+    .filter((s: AudioStream) => !!s.url)
+    .sort((a: AudioStream, b: AudioStream) => a.bitrate - b.bitrate);
+  const chapters: Chapter[] = (Array.isArray(data?.chapters) ? data.chapters : [])
+    .map((c: any) => ({
+      title: String(c.title ?? "Chapter"),
+      start: Number(c.start ?? 0),
+      image: c.image,
+    }))
+    .sort((a: Chapter, b: Chapter) => a.start - b.start);
+  return { audioStreams: audio, chapters, duration: Number(data?.duration ?? 0) };
 }
 
 export { ytThumb };
