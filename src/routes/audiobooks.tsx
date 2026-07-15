@@ -117,7 +117,14 @@ function Audiobooks() {
           </h2>
           <div className="space-y-1">
             {saved.map((t) => (
-              <SavedRow key={t.id} track={t} queue={saved} onPlay={play} />
+              <SavedRow
+                key={t.id}
+                track={t}
+                queue={saved}
+                onPlay={play}
+                onChapters={() => setChaptersFor(t)}
+                onDownload={() => setDownloadFor(t)}
+              />
             ))}
           </div>
         </section>
