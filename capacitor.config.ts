@@ -7,7 +7,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 const config: CapacitorConfig = {
   appId: "app.sonic.music",
   appName: "Sonic",
-  webDir: ".output/public",
+  webDir: "dist",
   server: {
     androidScheme: "https",
   },
