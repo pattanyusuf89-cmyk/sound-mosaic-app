@@ -20,7 +20,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
+       
+       name: Check Node version
+       run: |
+       node -v
+        npm -v
+        
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
