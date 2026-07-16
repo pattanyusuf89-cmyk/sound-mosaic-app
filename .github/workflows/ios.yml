@@ -1,0 +1,163 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install Capacitor CLI
+        run: bun add -d @capacitor/cli
+
+      - name: Build web app
+        run: bun run build
+
+      - name: Add iOS platform if missing
+        run: |
+          if [ ! -d "ios" ]; then
+            bun add @capacitor/core @capacitor/ios
+            npx cap add ios
+          fi
+
+      - name: Sync Capacitor iOS
+        run: npx cap sync ios
+
+      - name: Install CocoaPods
+        run: |
+          cd ios/App
+          pod install --repo-update
+
+      # ------------------------------------------------------------------
+      # Signing
+      #
+      # A distributable (signed) IPA requires an Apple Developer account.
+      # Set these repository secrets to enable signed builds:
+      #   BUILD_CERTIFICATE_BASE64  - base64 of your .p12 signing cert
+      #   P12_PASSWORD              - password for the .p12
+      #   BUILD_PROVISION_PROFILE_BASE64 - base64 of your .mobileprovision
+      #   KEYCHAIN_PASSWORD         - any string, used for the temp keychain
+      #   IOS_TEAM_ID               - your 10-char Apple Team ID
+      #   IOS_BUNDLE_ID             - e.g. app.sonic.music
+      #
+      # If any secret is missing the job falls back to an UNSIGNED archive
+      # so you still get an .xcarchive artifact to inspect locally.
+      # ------------------------------------------------------------------
+      - name: Import signing certificate
+        if: ${{ env.HAS_SIGNING == 'true' }}
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERT_PATH
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $CERT_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      - name: Check signing secrets
+        id: sig
+        run: |
+          if [ -n "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" ] && [ -n "${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}" ]; then
+            echo "HAS_SIGNING=true" >> $GITHUB_ENV
+          else
+            echo "HAS_SIGNING=false" >> $GITHUB_ENV
+          fi
+
+      - name: Build signed IPA
+        if: ${{ env.HAS_SIGNING == 'true' }}
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
+        run: |
+          cd ios/App
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            DEVELOPMENT_TEAM=$IOS_TEAM_ID \
+            PRODUCT_BUNDLE_IDENTIFIER=$IOS_BUNDLE_ID \
+            archive
+
+          cat > $RUNNER_TEMP/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>ad-hoc</string>
+            <key>teamID</key><string>${IOS_TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>compileBitcode</key><false/>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            -exportPath $RUNNER_TEMP/ipa
+
+      - name: Build unsigned archive (fallback)
+        if: ${{ env.HAS_SIGNING != 'true' }}
+        run: |
+          cd ios/App
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive || true
+
+      - name: Upload IPA
+        if: ${{ env.HAS_SIGNING == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ${{ runner.temp }}/ipa/*.ipa
+
+      - name: Upload unsigned archive
+        if: ${{ env.HAS_SIGNING != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcarchive-unsigned
+          path: ${{ runner.temp }}/App.xcarchive
+
+      - name: Clean up keychain
+        if: ${{ always() && env.HAS_SIGNING == 'true' }}
+        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
