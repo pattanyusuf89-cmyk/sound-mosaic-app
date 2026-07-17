@@ -329,6 +329,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setIndex(i);
     setCurrent(t);
     pushHistory(t);
+    ensureBackgroundMode();
+    updateBgNotification(t.title, t.artist);
     const offlineUrl = await getDownloadURL(t.id);
     if (offlineUrl && audioRef.current) {
       try { playerRef.current?.stopVideo?.(); } catch { /* ignore */ }
