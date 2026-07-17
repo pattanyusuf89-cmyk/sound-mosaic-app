@@ -17,14 +17,16 @@ const config: CapacitorConfig = {
   },
   plugins: {
     // Keeps the Chromium WebView alive as a foreground service while
-    // audio is playing. Requires @capgo/capacitor-background-mode
-    // (or an equivalent plugin) to be installed and Android
-    // FOREGROUND_SERVICE permissions declared in AndroidManifest.xml.
+    // audio is playing. Uses @anuradev/capacitor-background-mode
+    // together with the FOREGROUND_SERVICE permissions declared in
+    // AndroidManifest.xml.
     BackgroundMode: {
       title: "Sonic",
       text: "Playing music",
       silent: false,
       hidden: false,
+      bigText: true,
+      resume: true,
     },
   },
 };
