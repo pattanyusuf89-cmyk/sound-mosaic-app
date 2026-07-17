@@ -18,6 +18,34 @@ import {
 } from "@/lib/storage";
 import { getRelated } from "@/lib/youtube";
 import { getDownloadURL } from "@/lib/downloads";
+import { Capacitor } from "@capacitor/core";
+import { BackgroundMode } from "@anuradev/capacitor-background-mode";
+
+// Enable Android foreground-service background mode on first import.
+// Safe no-op on web (Capacitor.isNativePlatform() is false).
+let bgModeInit = false;
+async function ensureBackgroundMode() {
+  if (bgModeInit || !Capacitor.isNativePlatform()) return;
+  bgModeInit = true;
+  try {
+    await BackgroundMode.enable();
+    await BackgroundMode.disableWebViewOptimizations();
+    // Best-effort: some plugin versions expose these extras.
+    // @ts-expect-error optional API
+    await BackgroundMode.disableBatteryOptimizations?.();
+    // @ts-expect-error optional API
+    await BackgroundMode.setSettings?.({
+      title: "Sonic",
+      text: "Playing music",
+      silent: false,
+      hidden: false,
+      bigText: true,
+      resume: true,
+    });
+  } catch {
+    /* ignore — plugin only available on native */
+  }
+}
 
 // ---- YouTube IFrame API loader ----
 let ytReadyPromise: Promise<typeof window.YT> | null = null;
