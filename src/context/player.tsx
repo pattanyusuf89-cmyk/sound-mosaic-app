@@ -18,6 +18,42 @@ import {
 } from "@/lib/storage";
 import { getRelated } from "@/lib/youtube";
 import { getDownloadURL } from "@/lib/downloads";
+import { Capacitor } from "@capacitor/core";
+import { BackgroundMode } from "@anuradev/capacitor-background-mode";
+
+// Enable Android foreground-service background mode on first import.
+// Safe no-op on web (Capacitor.isNativePlatform() is false).
+let bgModeInit = false;
+async function ensureBackgroundMode() {
+  if (bgModeInit || !Capacitor.isNativePlatform()) return;
+  bgModeInit = true;
+  try {
+    try {
+      await BackgroundMode.requestNotificationsPermission();
+    } catch { /* ignore */ }
+    await BackgroundMode.enable({
+      title: "Sonic",
+      text: "Playing music",
+      silent: false,
+      hidden: false,
+      bigText: true,
+      resume: true,
+    });
+    await BackgroundMode.disableWebViewOptimizations();
+    try {
+      await BackgroundMode.requestDisableBatteryOptimizations();
+    } catch { /* ignore */ }
+  } catch {
+    /* ignore — plugin only available on native */
+  }
+}
+
+async function updateBgNotification(title: string, text: string) {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await BackgroundMode.updateNotification({ title, text, bigText: true });
+  } catch { /* ignore */ }
+}
 
 // ---- YouTube IFrame API loader ----
 let ytReadyPromise: Promise<typeof window.YT> | null = null;
@@ -244,6 +280,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setIndex(idx);
     setCurrent(t);
     pushHistory(t);
+    ensureBackgroundMode();
+    updateBgNotification(t.title, t.artist);
     // Prefer offline blob when available.
     const offlineUrl = await getDownloadURL(t.id);
     if (offlineUrl && audioRef.current) {
@@ -291,6 +329,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setIndex(i);
     setCurrent(t);
     pushHistory(t);
+    ensureBackgroundMode();
+    updateBgNotification(t.title, t.artist);
     const offlineUrl = await getDownloadURL(t.id);
     if (offlineUrl && audioRef.current) {
       try { playerRef.current?.stopVideo?.(); } catch { /* ignore */ }

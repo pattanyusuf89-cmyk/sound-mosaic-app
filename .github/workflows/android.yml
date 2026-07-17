@@ -42,9 +42,25 @@ jobs:
       - name: Add Android platform if missing
         run: |
           if [ ! -d "android" ]; then
-            bun add @capacitor/core @capacitor/android
+            bun add @capacitor/core @capacitor/android @capacitor/app @anuradev/capacitor-background-mode
             npx cap add android
           fi
+
+      - name: Inject background-audio permissions into AndroidManifest.xml
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          # Insert permissions right after the opening <manifest ...> tag if missing.
+          for PERM in \
+            "android.permission.FOREGROUND_SERVICE" \
+            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" \
+            "android.permission.WAKE_LOCK" \
+            "android.permission.POST_NOTIFICATIONS" \
+            "android.permission.MODIFY_AUDIO_SETTINGS"; do
+            if ! grep -q "$PERM" "$MANIFEST"; then
+              sed -i "0,/<application/{s|<application|    <uses-permission android:name=\"$PERM\" />\n    <application|}" "$MANIFEST"
+            fi
+          done
+          cat "$MANIFEST"
 
       - name: Sync Capacitor Android
         run: npx cap sync android
