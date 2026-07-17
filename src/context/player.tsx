@@ -280,6 +280,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setIndex(idx);
     setCurrent(t);
     pushHistory(t);
+    ensureBackgroundMode();
+    updateBgNotification(t.title, t.artist);
     // Prefer offline blob when available.
     const offlineUrl = await getDownloadURL(t.id);
     if (offlineUrl && audioRef.current) {
