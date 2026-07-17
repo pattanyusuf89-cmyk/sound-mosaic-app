@@ -28,13 +28,10 @@ async function ensureBackgroundMode() {
   if (bgModeInit || !Capacitor.isNativePlatform()) return;
   bgModeInit = true;
   try {
-    await BackgroundMode.enable();
-    await BackgroundMode.disableWebViewOptimizations();
-    // Best-effort: some plugin versions expose these extras.
-    // @ts-expect-error optional API
-    await BackgroundMode.disableBatteryOptimizations?.();
-    // @ts-expect-error optional API
-    await BackgroundMode.setSettings?.({
+    try {
+      await BackgroundMode.requestNotificationsPermission();
+    } catch { /* ignore */ }
+    await BackgroundMode.enable({
       title: "Sonic",
       text: "Playing music",
       silent: false,
@@ -42,9 +39,20 @@ async function ensureBackgroundMode() {
       bigText: true,
       resume: true,
     });
+    await BackgroundMode.disableWebViewOptimizations();
+    try {
+      await BackgroundMode.requestDisableBatteryOptimizations();
+    } catch { /* ignore */ }
   } catch {
     /* ignore — plugin only available on native */
   }
+}
+
+async function updateBgNotification(title: string, text: string) {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await BackgroundMode.updateNotification({ title, text, bigText: true });
+  } catch { /* ignore */ }
 }
 
 // ---- YouTube IFrame API loader ----
