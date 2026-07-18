@@ -313,8 +313,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (playing) audioRef.current.pause(); else audioRef.current.play().catch(() => {});
       return;
     }
-    const p = playerRef.current; if (!p) return;
-    if (playing) p.pauseVideo(); else p.playVideo();
+    const p = playerRef.current;
+    if (!p || typeof p.playVideo !== "function") return;
+    try {
+      if (playing) p.pauseVideo(); else p.playVideo();
+    } catch { /* ignore */ }
   }, [playing]);
 
   const seek = useCallback((t: number) => {
