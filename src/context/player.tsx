@@ -273,7 +273,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [current]);
 
-  const play = useCallback(async (t: Track, q?: Track[]) => {
+  const play = useCallback((t: Track, q?: Track[]) => {
     const newQueue = q && q.length ? q : [t];
     const idx = Math.max(0, newQueue.findIndex((x) => x.id === t.id));
     setQueue(newQueue);
@@ -282,21 +282,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     pushHistory(t);
     ensureBackgroundMode();
     updateBgNotification(t.title, t.artist);
-    // Prefer offline blob when available.
-    const offlineUrl = await getDownloadURL(t.id);
-    if (offlineUrl && audioRef.current) {
-      try { playerRef.current?.stopVideo?.(); } catch { /* ignore */ }
-      modeRef.current = "offline";
-      audioRef.current.src = offlineUrl;
-      audioRef.current.play().catch(() => { /* ignore */ });
-      return;
-    }
+    // Kick off YT immediately (preserves the user-gesture for autoplay on mobile).
     modeRef.current = "yt";
     try { audioRef.current?.pause(); if (audioRef.current) audioRef.current.removeAttribute("src"); } catch { /* ignore */ }
     const doPlay = () => {
+      const p = playerRef.current;
+      if (!p || typeof p.loadVideoById !== "function") return;
       try {
-        playerRef.current.loadVideoById({ videoId: t.id });
-        playerRef.current.playVideo();
+        p.loadVideoById({ videoId: t.id });
+        if (typeof p.playVideo === "function") p.playVideo();
       } catch { /* ignore */ }
     };
     if (readyRef.current && playerRef.current?.loadVideoById) doPlay();
@@ -306,6 +300,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }, 100);
       setTimeout(() => clearInterval(iv), 5000);
     });
+    // In parallel, check for an offline copy and swap over if present.
+    getDownloadURL(t.id).then((offlineUrl) => {
+      if (!offlineUrl || !audioRef.current) return;
+      try { playerRef.current?.stopVideo?.(); } catch { /* ignore */ }
+      modeRef.current = "offline";
+      audioRef.current.src = offlineUrl;
+      audioRef.current.play().catch(() => { /* ignore */ });
+    }).catch(() => { /* ignore */ });
   }, []);
 
   const toggle = useCallback(() => {
@@ -326,7 +328,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setPosition(t);
   }, []);
 
-  const playAt = useCallback(async (i: number) => {
+  const playAt = useCallback((i: number) => {
     if (i < 0 || i >= queue.length) return;
     const t = queue[i];
     setIndex(i);
@@ -334,20 +336,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     pushHistory(t);
     ensureBackgroundMode();
     updateBgNotification(t.title, t.artist);
-    const offlineUrl = await getDownloadURL(t.id);
-    if (offlineUrl && audioRef.current) {
+    modeRef.current = "yt";
+    try { audioRef.current?.pause(); if (audioRef.current) audioRef.current.removeAttribute("src"); } catch { /* ignore */ }
+    try {
+      const p = playerRef.current;
+      if (p && typeof p.loadVideoById === "function") {
+        p.loadVideoById({ videoId: t.id });
+        if (typeof p.playVideo === "function") p.playVideo();
+      }
+    } catch { /* ignore */ }
+    getDownloadURL(t.id).then((offlineUrl) => {
+      if (!offlineUrl || !audioRef.current) return;
       try { playerRef.current?.stopVideo?.(); } catch { /* ignore */ }
       modeRef.current = "offline";
       audioRef.current.src = offlineUrl;
       audioRef.current.play().catch(() => {});
-      return;
-    }
-    modeRef.current = "yt";
-    try { audioRef.current?.pause(); if (audioRef.current) audioRef.current.removeAttribute("src"); } catch { /* ignore */ }
-    try {
-      playerRef.current?.loadVideoById({ videoId: t.id });
-      playerRef.current?.playVideo();
-    } catch { /* ignore */ }
+    }).catch(() => { /* ignore */ });
   }, [queue]);
 
   const next = useCallback(async () => {
