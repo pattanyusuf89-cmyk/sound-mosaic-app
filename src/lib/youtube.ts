@@ -1,13 +1,24 @@
 import type { Track } from "./types";
 
 // Public Piped instances (fallback in order). No API key needed.
-const PIPED_INSTANCES = [
+// Ordered by observed reliability + CORS support from browsers.
+// Most public Piped instances DON'T set Access-Control-Allow-Origin,
+// so we wrap them in a CORS proxy as a last resort.
+const RAW_INSTANCES = [
+  "https://api.piped.private.coffee",
   "https://pipedapi.kavin.rocks",
+  "https://pipedapi.adminforge.de",
   "https://pipedapi.reallyaweso.me",
   "https://pipedapi.leptons.xyz",
-  "https://pipedapi.adminforge.de",
-  "https://api.piped.private.coffee",
+  "https://pipedapi.r4fo.com",
+  "https://pipedapi.orangenet.cc",
 ];
+// CORS-proxied fallbacks — used only if all direct calls fail.
+const PROXIED_INSTANCES = RAW_INSTANCES.flatMap((base) => [
+  `https://corsproxy.io/?url=${encodeURIComponent(base)}`,
+  `https://api.allorigins.win/raw?url=${encodeURIComponent(base)}`,
+]);
+const PIPED_INSTANCES = [...RAW_INSTANCES, ...PROXIED_INSTANCES];
 
 async function pipedFetch(path: string): Promise<any> {
   let lastErr: unknown;
@@ -15,7 +26,11 @@ async function pipedFetch(path: string): Promise<any> {
     try {
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), 6000);
-      const res = await fetch(base + path, { signal: controller.signal });
+      // Proxies that take ?url= need the path appended to the encoded target.
+      const url = base.includes("url=")
+        ? base + encodeURIComponent(path)
+        : base + path;
+      const res = await fetch(url, { signal: controller.signal });
       clearTimeout(t);
       if (!res.ok) throw new Error(`${base} ${res.status}`);
       return await res.json();
